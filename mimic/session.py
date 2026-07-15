@@ -19,10 +19,11 @@ _IDEMPOTENT_METHODS = frozenset({"GET", "HEAD", "OPTIONS", "PUT", "DELETE"})
 class Session:
     """Base URL + reusable headers, with helpers that return parsed JSON.
 
-    Construct one of three ways:
+    Construct one of four ways:
         Session.from_mitm("prod-api.hingeaws.net")   # pull from mitmweb
         Session(base_url=..., headers={...})         # explicit
         Session.from_curl(text)                      # paste a copied cURL
+        Session.from_har("session.har")              # load a browser HAR export
     """
 
     def __init__(self, base_url, headers=None, host=None, mitm=None):
@@ -49,6 +50,24 @@ class Session:
     def from_curl(cls, text):
         base_url, headers = _parse_curl(text)
         return cls(base_url, headers)
+
+    @classmethod
+    def from_har(cls, path, host=None):
+        """Build a session from a HAR file exported from browser devtools.
+
+        With no host, picks the most-requested host in the file.
+        """
+        from .sources import har
+        flows = har.load(path)
+        if not host:
+            ranked = har.hosts(path)
+            if not ranked:
+                raise RuntimeError("HAR file has no entries")
+            host = ranked[0][0]
+        headers = extract.session_headers(flows, host)
+        if not headers:
+            raise RuntimeError(f"no authenticated request to {host} in the HAR file")
+        return cls(extract.base_url(flows, host), headers, host=host)
 
     # ---- calls --------------------------------------------------------------
     def request(self, method, path, json=None, params=None, refresh=None, **kw):

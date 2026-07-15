@@ -16,12 +16,27 @@ import sys
 
 from . import codegen
 from . import unpin
+from .sources import har
 from .sources import mitm
 
 
 def _mitm_and_flows():
     m = mitm.Mitm()
     return m, m.flows()
+
+
+def _flows_from_args(args):
+    """Flows from a HAR file when --har is given, else from live mitmweb."""
+    if getattr(args, "har", None):
+        return None, har.load(args.har)
+    return _mitm_and_flows()
+
+
+def _endpoints_from_args(args, m, flows):
+    """Endpoints for a host, from HAR (inline bodies) or mitmweb (fetched)."""
+    if getattr(args, "har", None):
+        return har.endpoints(args.har, args.host)
+    return mitm.endpoints(m, flows, args.host)
 
 
 def _lan_ip():
@@ -124,9 +139,11 @@ def cmd_doctor(args):
 
 
 def cmd_hosts(args):
-    _, flows = _mitm_and_flows()
+    _, flows = _flows_from_args(args)
     rows = mitm.hosts(flows)
     if not rows:
+        if getattr(args, "har", None):
+            sys.exit("no entries in the HAR file")
         sys.exit("no traffic captured yet — run `mimic record` and use the app")
     print(f"{'requests':>9}  host")
     for host, n in rows:
@@ -135,20 +152,20 @@ def cmd_hosts(args):
 
 
 def cmd_learn(args):
-    m, flows = _mitm_and_flows()
-    eps = mitm.endpoints(m, flows, args.host)
+    m, flows = _flows_from_args(args)
+    eps = _endpoints_from_args(args, m, flows)
     if not eps:
-        sys.exit(f"no requests to {args.host} captured")
+        sys.exit(f"no requests to {args.host} found")
     print(f"{args.host}: {len(eps)} endpoints\n")
     for e in eps:
         print(f"  {e['method']:5s} {e['path']}   -> {e['status']}")
 
 
 def cmd_gen(args):
-    m, flows = _mitm_and_flows()
-    eps = mitm.endpoints(m, flows, args.host)
+    m, flows = _flows_from_args(args)
+    eps = _endpoints_from_args(args, m, flows)
     if not eps:
-        sys.exit(f"no requests to {args.host} captured")
+        sys.exit(f"no requests to {args.host} found")
 
     if args.prompt_only:
         print(codegen.build_prompt(args.host, eps))
@@ -183,10 +200,13 @@ def main(argv=None):
 
     sub.add_parser("record", help="start the proxy + iPhone setup steps").set_defaults(func=cmd_record)
     sub.add_parser("doctor", help="check your setup").set_defaults(func=cmd_doctor)
-    sub.add_parser("hosts", help="list captured hosts").set_defaults(func=cmd_hosts)
+    hp = sub.add_parser("hosts", help="list captured hosts")
+    hp.add_argument("--har", metavar="FILE", help="read from a HAR file instead of mitmweb")
+    hp.set_defaults(func=cmd_hosts)
 
     lp = sub.add_parser("learn", help="show endpoints for a host")
     lp.add_argument("host")
+    lp.add_argument("--har", metavar="FILE", help="read from a HAR file instead of mitmweb")
     lp.set_defaults(func=cmd_learn)
 
     gp = sub.add_parser("gen", help="AI-generate a client for a host")
@@ -196,6 +216,7 @@ def main(argv=None):
     gp.add_argument("--generator", default="claude", choices=["claude", "opencode"],
                     help="AI generator to use (default: claude)")
     gp.add_argument("--prompt-only", action="store_true", help="print the prompt instead of calling the AI generator")
+    gp.add_argument("--har", metavar="FILE", help="read from a HAR file instead of mitmweb")
     gp.set_defaults(func=cmd_gen)
 
     up = sub.add_parser("unpin", help="defeat cert pinning via Frida so capture works")

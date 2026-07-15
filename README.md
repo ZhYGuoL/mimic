@@ -93,6 +93,11 @@ pass `refresh=True`.
   runs it via `uvx`, so there's nothing extra to install.
 - **cURL / paste** for anything with a web version. `Copy as cURL` in devtools,
   then `Session.from_curl(text)`. No proxy, no cert.
+- **HAR file** for web apps and anything you can capture in a browser. In Chrome
+  or Firefox devtools, open the Network tab, right-click a request, and choose
+  "Save all as HAR". Then `mimic hosts --har traffic.har` and
+  `mimic gen api.example.com --har traffic.har`, or build a session directly with
+  `Session.from_har("traffic.har", "api.example.com")`. No proxy, no cert.
 
 ## Limitations
 
